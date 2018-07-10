@@ -3,6 +3,8 @@
 #include <ccpacket.h>
 #include <CircularBuffer.h>
 
+#include "KISS.h"
+
 #define CC1101Interrupt 0 // Pin 2
 #define CC1101_GDO0 2
 
@@ -57,11 +59,32 @@ CircularBuffer<uint8_t, 100> output_buffer;
 // Used for sending and receiving data from the CC1101
 CCPACKET ccPacket;
 
+// Incoming KISS packets
+KISSCtx kissCtx;
+
 bool packetWaiting;
 
 void messageReceived() {
   PRINTLN("In messageReceived");
   packetWaiting = true;
+}
+
+void on_kiss_packet(uint8_t * data, uint8_t len) {
+  input_buffer.push(FEND);
+  input_buffer.push(0x00);
+  for (unsigned i = 0; i < len; i++) {
+    uint8_t b = data[i];
+    if (b == FEND) {
+      input_buffer.push(FESC);
+      input_buffer.push(TFEND);
+    } else if (b == FESC) {
+      input_buffer.push(FESC);
+      input_buffer.push(TFESC);
+    } else {
+      input_buffer.push(b);
+    }
+  }
+  input_buffer.push(FEND);
 }
 
 unsigned long last_tx = 0;
@@ -124,12 +147,7 @@ void loop() {
   while (Serial.available() && input_buffer.available() > 0) {
     PRINTLN("Reading Serial input");
     uint8_t byte = Serial.read();
-    bool res = input_buffer.push(byte);
-    if(!res) {
-      // Shouldn't happen
-      PRINTLN("!!!! Input Buffer Overrun !!!!");
-      break;
-    }
+    read_kiss(byte, &kissCtx);
   }
 
   // Check if we can TX
